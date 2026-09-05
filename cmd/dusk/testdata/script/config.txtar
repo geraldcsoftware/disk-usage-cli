@@ -1,0 +1,58 @@
+# config path resolves through XDG_CONFIG_HOME
+exec dusk config path
+stdout 'config/dusk/config.toml$'
+
+# no config file is a configuration error for every command except check
+exit 78 dusk config validate
+exit 78 dusk rules
+exit 3 dusk check
+
+# a valid config reports warnings for paths that do not exist yet
+mkdir $XDG_CONFIG_HOME/dusk
+cp valid.toml $XDG_CONFIG_HOME/dusk/config.toml
+exec dusk config validate
+stdout 'config valid'
+stdout 'warning: dir rule "later": path .* does not exist yet'
+
+# unknown keys are reported with their line
+cp unknown.toml $XDG_CONFIG_HOME/dusk/config.toml
+exit 78 dusk config validate
+stderr 'line 2: unknown key "disk.free_below"'
+
+# an ambiguous size is rejected
+cp ambiguous.toml $XDG_CONFIG_HOME/dusk/config.toml
+exit 78 dusk config validate
+stderr 'ambiguous'
+
+# a shell as cleanup_command is rejected
+cp shell.toml $XDG_CONFIG_HOME/dusk/config.toml
+exit 78 dusk config validate
+stderr 'cleanup_command may not start with "sh"'
+
+-- valid.toml --
+[[dir_rules]]
+rule_name = "maven-repository"
+path      = "~/.m2/repository"
+max_size  = "6GB"
+
+[[dir_rules]]
+rule_name = "later"
+path      = "~/not-yet"
+max_size  = "1GB"
+
+-- unknown.toml --
+[disk]
+free_below = ["10%"]
+
+-- ambiguous.toml --
+[[dir_rules]]
+rule_name = "m"
+path      = "~/.m2/repository"
+max_size  = "6G"
+
+-- shell.toml --
+[[command_rules]]
+rule_name       = "c"
+path            = "~/.m2/repository"
+max_size        = "1GB"
+cleanup_command = ["sh", "-c", "true"]

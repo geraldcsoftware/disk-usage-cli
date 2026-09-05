@@ -1,0 +1,73 @@
+# before any check, status says so and the prompt is empty
+mkdir $XDG_CONFIG_HOME/dusk
+cp config.toml $XDG_CONFIG_HOME/dusk/config.toml
+exec dusk status
+stderr 'no status yet'
+exec dusk status --prompt
+! stdout .
+
+# a check writes status.json, prompt and samples, and exits with the state code
+exit 0 dusk check
+exists $XDG_STATE_HOME/dusk/status.json
+exists $XDG_STATE_HOME/dusk/prompt
+exists $XDG_STATE_HOME/dusk/samples.jsonl
+exists $XDG_STATE_HOME/dusk/lock
+
+# the one rule is over its 1 KB maximum, so the prompt carries the suffix
+exec dusk status --prompt
+stdout '^· 1 over max$'
+
+exec dusk status
+stdout 'state ok'
+stdout 'maven-repository'
+stdout 'over'
+
+exec dusk status --json
+stdout '"schema": 1'
+stdout '"state": "ok"'
+stdout '"over_max_count": 1'
+
+exec dusk rules
+stdout 'maven-repository'
+! stdout 'unmeasured'
+
+# report measures now and never writes status
+exec dusk report
+stdout 'maven-repository'
+stdout 'big.jar'
+
+# a tiny stale_after makes the prompt report staleness on the next read
+cp stale.toml $XDG_CONFIG_HOME/dusk/config.toml
+exit 0 dusk check
+exec dusk status --prompt
+stdout 'dusk stale'
+
+-- home/.m2/repository/big.jar --
+0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789
+-- config.toml --
+[disk.warn]
+when_free_below  = ["1%"]
+clear_when_above = ["2%"]
+[disk.critical]
+when_free_below  = ["0.5%"]
+clear_when_above = ["1%"]
+
+[[dir_rules]]
+rule_name = "maven-repository"
+path      = "~/.m2/repository"
+max_size  = "1KB"
+
+-- stale.toml --
+[disk.warn]
+when_free_below  = ["1%"]
+clear_when_above = ["2%"]
+[disk.critical]
+when_free_below  = ["0.5%"]
+clear_when_above = ["1%"]
+[prompt]
+stale_after = "1ms"
+
+[[dir_rules]]
+rule_name = "maven-repository"
+path      = "~/.m2/repository"
+max_size  = "1KB"
