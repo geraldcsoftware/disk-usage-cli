@@ -137,6 +137,47 @@ func TestStatusRoundTripThroughPreallocatedFile(t *testing.T) {
 	}
 }
 
+func TestStatusWriteRepairsSparseFile(t *testing.T) {
+	d := testDir(t)
+	f, err := os.Create(d.Path("status.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(64 << 10); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	var before unix.Stat_t
+	if err := unix.Stat(d.Path("status.json"), &before); err != nil {
+		t.Fatal(err)
+	}
+	if before.Blocks != 0 {
+		t.Fatalf("sparse fixture already has %d blocks allocated", before.Blocks)
+	}
+	now := time.Date(2026, 9, 5, 10, 30, 5, 0, time.UTC)
+	if err := d.WriteStatus(sampleStatus(now)); err != nil {
+		t.Fatal(err)
+	}
+	var after unix.Stat_t
+	if err := unix.Stat(d.Path("status.json"), &after); err != nil {
+		t.Fatal(err)
+	}
+	if after.Blocks*512 < 64<<10 {
+		t.Errorf("allocated %d after write, want at least 64 KiB of real blocks", after.Blocks*512)
+	}
+	raw, err := os.ReadFile(d.Path("status.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) != 64<<10 {
+		t.Errorf("status.json is %d bytes, want the full 64 KiB", len(raw))
+	}
+	got, err := d.ReadStatus()
+	if err != nil || got.Disk.State != "warn" || !got.TS.Equal(now) {
+		t.Errorf("round trip after sparse repair = %+v, %v", got, err)
+	}
+}
+
 func TestStatusTooLargeIsRefused(t *testing.T) {
 	d := testDir(t)
 	s := sampleStatus(time.Now())

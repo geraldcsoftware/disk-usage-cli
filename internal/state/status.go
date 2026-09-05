@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/geraldcsoftware/disk-usage-cli/internal/sys"
+	"golang.org/x/sys/unix"
 )
 
 // statusCapacity is the pre-allocated size of status.json. The file is
@@ -114,12 +115,21 @@ func (d Dir) WriteStatus(s *Status) error {
 		return err
 	}
 	defer f.Close()
-	fi, err := f.Stat()
-	if err != nil {
+	var fst unix.Stat_t
+	if err := unix.Fstat(int(f.Fd()), &fst); err != nil {
 		return err
 	}
-	if fi.Size() < statusCapacity {
-		if err := sys.Preallocate(f, statusCapacity-fi.Size()); err != nil {
+	// The check is against real allocated blocks, not logical size: a file
+	// can already be 64 KiB long but sparse (restored from a backup, or
+	// created by truncation), in which case sys.Preallocate cannot fill its
+	// holes because it only reserves blocks beyond the current end of file.
+	// Truncating to zero first removes any partial allocation so the
+	// preallocation call starts from a clean, empty file.
+	if sys.AllocatedBytes(&fst) < statusCapacity {
+		if err := f.Truncate(0); err != nil {
+			return err
+		}
+		if err := sys.Preallocate(f, statusCapacity); err != nil {
 			return err
 		}
 	}
