@@ -18,6 +18,9 @@ func newConfigCmd(s *session) *cobra.Command {
 		Short: "Print the resolved config file path",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := s.requireHome(); err != nil {
+				return err
+			}
 			_, err := fmt.Fprintln(s.app.Stdout, s.configPath)
 			return err
 		},

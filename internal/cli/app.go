@@ -123,21 +123,30 @@ func newRoot(app *App) *cobra.Command {
 	return root
 }
 
-// prepare resolves the home directory, colour mode and config path once the
-// persistent flags are parsed.
+// prepare resolves the colour mode for every command, and the home directory
+// and config path for those that have one available. It never fails on a
+// missing home directory, since cobra's own help and completion commands need
+// neither; commands that do need one call requireHome first.
 func (s *session) prepare() error {
 	s.home = s.app.Getenv("HOME")
-	if s.home == "" {
-		return exitWith(ExitConfig, errors.New("HOME is not set"))
-	}
 	enabled, err := report.ColorEnabled(s.color, s.app.Getenv, s.app.StdoutIsTerminal)
 	if err != nil {
 		return exitWith(ExitUsage, err)
 	}
 	s.palette = report.Palette{Enabled: enabled}
 	s.format = report.Format{IEC: s.iec}
-	if s.configPath == "" {
+	if s.configPath == "" && s.home != "" {
 		s.configPath = config.DefaultPath(s.app.Getenv, s.home)
+	}
+	return nil
+}
+
+// requireHome fails with ExitConfig when no home directory is available. Call
+// it first in any command that needs the home directory or resolved config
+// path, since prepare leaves both empty rather than failing outright.
+func (s *session) requireHome() error {
+	if s.home == "" {
+		return exitWith(ExitConfig, errors.New("HOME is not set"))
 	}
 	return nil
 }
@@ -145,6 +154,9 @@ func (s *session) prepare() error {
 // loadConfig parses and validates the config. Warnings are returned for the
 // caller to print; errors carry ExitConfig.
 func (s *session) loadConfig() (*config.Config, []string, error) {
+	if err := s.requireHome(); err != nil {
+		return nil, nil, err
+	}
 	cfg, err := config.Load(s.configPath, s.home)
 	if err != nil {
 		return nil, nil, exitWith(ExitConfig, fmt.Errorf("%s: %w", s.configPath, err))
@@ -157,6 +169,9 @@ func (s *session) loadConfig() (*config.Config, []string, error) {
 }
 
 func (s *session) stateDir() (state.Dir, error) {
+	if err := s.requireHome(); err != nil {
+		return "", err
+	}
 	d, err := state.DefaultDir(s.app.Getenv, s.home)
 	if err != nil {
 		return "", exitWith(ExitUnknown, fmt.Errorf("state directory: %w", err))

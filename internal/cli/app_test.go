@@ -89,6 +89,31 @@ func TestUsageErrors(t *testing.T) {
 	}
 }
 
+func TestCommandsWithoutHome(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	run := func(args ...string) int {
+		stdout.Reset()
+		stderr.Reset()
+		return Main(args, App{
+			Info:   BuildInfo{Version: "1.2.3", Commit: "abc", Date: "2026-09-05"},
+			Stdout: &stdout, Stderr: &stderr,
+			Getenv: func(string) string { return "" },
+			Now:    func() time.Time { return time.Date(2026, 9, 5, 10, 0, 0, 0, time.UTC) },
+		})
+	}
+	if code := run("version"); code != 0 || !strings.Contains(stdout.String(), "dusk 1.2.3") {
+		t.Errorf("version without HOME: exit %d, out %q", code, stdout.String())
+	}
+	if code := run("completion", "zsh"); code != 0 || !strings.Contains(stdout.String(), "compdef") {
+		t.Errorf("completion without HOME: exit %d, out %q", code, stdout.String())
+	}
+	for _, args := range [][]string{{"config", "path"}, {"rules"}, {"config", "validate"}} {
+		if code := run(args...); code != ExitConfig || !strings.Contains(stderr.String(), "HOME is not set") {
+			t.Errorf("%v without HOME: exit %d, err %q, want %d and \"HOME is not set\"", args, code, stderr.String(), ExitConfig)
+		}
+	}
+}
+
 func TestConfigPathAndValidate(t *testing.T) {
 	h := newHarness(t)
 	if code := h.run("config", "path"); code != 0 || strings.TrimSpace(h.stdout.String()) != filepath.Join(h.home, ".config", "dusk", "config.toml") {
