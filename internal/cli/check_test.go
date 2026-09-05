@@ -113,6 +113,61 @@ func TestCheckCarriesRulesForwardUntilDue(t *testing.T) {
 	}
 }
 
+func TestCheckRemeasuresWhenRulesChange(t *testing.T) {
+	h := newHarness(t)
+	h.writeConfig(t, lenientConfig)
+	if code := h.run("check"); code != 0 {
+		t.Fatal(h.stderr.String())
+	}
+	h.now = h.now.Add(30 * time.Minute)
+	h.writeConfig(t, strings.Replace(lenientConfig, `max_size  = "1KB"`, `max_size  = "2KB"`, 1))
+	if code := h.run("check"); code != 0 {
+		t.Fatal(h.stderr.String())
+	}
+	st := h.statusFile(t)
+	if len(st.Rules) != 1 || st.Rules[0].MeasuredAt == nil || !st.Rules[0].MeasuredAt.Equal(h.now) || st.Rules[0].MaxBytes != 2000 {
+		t.Errorf("rules after max_size change = %+v", st.Rules)
+	}
+
+	h.now = h.now.Add(time.Minute)
+	h.writeConfig(t, strings.Replace(lenientConfig, `max_size  = "1KB"`, `max_size  = "2KB"`, 1)+`
+[[dir_rules]]
+rule_name = "second"
+path      = "~/Library/Caches/Homebrew"
+max_size  = "1GB"
+`)
+	if code := h.run("check"); code != 0 {
+		t.Fatal(h.stderr.String())
+	}
+	st = h.statusFile(t)
+	if len(st.Rules) != 2 {
+		t.Fatalf("rules after adding a rule = %+v", st.Rules)
+	}
+	for _, r := range st.Rules {
+		if r.MeasuredAt == nil || !r.MeasuredAt.Equal(h.now) {
+			t.Errorf("rule %q not re-measured: %+v", r.RuleName, r)
+		}
+	}
+}
+
+func TestPromptSurvivesBrokenConfig(t *testing.T) {
+	h := newHarness(t)
+	h.writeConfig(t, lenientConfig)
+	if err := os.WriteFile(filepath.Join(h.home, ".m2", "repository", "big.jar"), make([]byte, 8192), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code := h.run("check"); code != 0 {
+		t.Fatal(h.stderr.String())
+	}
+	h.writeConfig(t, "[disk]\nfree_below = 1\n")
+	if code := h.run("status", "--prompt"); code != 0 || h.stdout.String() != "· 1 over max" || h.stderr.String() != "" {
+		t.Errorf("prompt with broken config: exit %d, out %q, err %q", code, h.stdout.String(), h.stderr.String())
+	}
+	if code := h.run("status"); code != ExitConfig {
+		t.Errorf("status with broken config: exit %d, want %d", code, ExitConfig)
+	}
+}
+
 func TestCheckExitCodesAndLock(t *testing.T) {
 	h := newHarness(t)
 	if code := h.run("check"); code != ExitUnknown {

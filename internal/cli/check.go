@@ -81,7 +81,7 @@ func runCheck(s *session, cfg *config.Config, dir state.Dir, full bool) (policy.
 
 	var rules []state.RuleStatus
 	samples := []state.Sample{}
-	if full || snap.State == policy.Critical || measurementDue(prev, cfg.Schedule.MeasureRuleDirsEvery.Std(), now) {
+	if full || snap.State == policy.Critical || measurementDue(prev, cfg.Rules(), cfg.Schedule.MeasureRuleDirsEvery.Std(), now) {
 		rules, samples, _ = measureRules(cfg, s.home, now, false)
 	} else {
 		rules = prev.Rules

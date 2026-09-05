@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/geraldcsoftware/disk-usage-cli/internal/config"
 	"github.com/geraldcsoftware/disk-usage-cli/internal/report"
 	"github.com/geraldcsoftware/disk-usage-cli/internal/state"
 )
@@ -21,8 +22,12 @@ func newStatusCmd(s *session) *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, _, err := s.loadConfig()
-			if err != nil {
+			if err != nil && !prompt {
 				return err
+			}
+			promptTemplates := config.Default().Prompt
+			if cfg != nil {
+				promptTemplates = cfg.Prompt
 			}
 			dir, err := s.stateDir()
 			if err != nil {
@@ -41,7 +46,7 @@ func newStatusCmd(s *session) *cobra.Command {
 			now := s.app.Now()
 			switch {
 			case prompt:
-				_, err = fmt.Fprint(s.app.Stdout, report.RenderPrompt(st, cfg.Prompt, now))
+				_, err = fmt.Fprint(s.app.Stdout, report.RenderPrompt(st, promptTemplates, now))
 				return err
 			case s.json:
 				enc := json.NewEncoder(s.app.Stdout)

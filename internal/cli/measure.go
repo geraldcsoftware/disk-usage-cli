@@ -47,13 +47,27 @@ func measureRules(cfg *config.Config, home string, now time.Time, collectUnits b
 	return statuses, samples, measurements
 }
 
-// measurementDue reports whether rule directories need walking this run.
-func measurementDue(prev *state.Status, every time.Duration, now time.Time) bool {
+// measurementDue reports whether rule directories need walking this run: the
+// interval has elapsed since the oldest measurement, there is no previous
+// measurement yet, or the configured rules have changed (added, removed or
+// had their maximum size edited) since the previous run.
+func measurementDue(prev *state.Status, refs []config.RuleRef, every time.Duration, now time.Time) bool {
 	if prev == nil || len(prev.Rules) == 0 {
 		return true
 	}
+	if len(prev.Rules) != len(refs) {
+		return true
+	}
+	maxByName := make(map[string]int64, len(refs))
+	for _, ref := range refs {
+		maxByName[ref.Name] = int64(ref.MaxSize)
+	}
 	for _, r := range prev.Rules {
 		if r.MeasuredAt == nil || !now.Before(r.MeasuredAt.Add(every)) {
+			return true
+		}
+		max, ok := maxByName[r.RuleName]
+		if !ok || max != r.MaxBytes {
 			return true
 		}
 	}
