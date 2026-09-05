@@ -239,6 +239,52 @@ func TestCheckExitCodesAndLock(t *testing.T) {
 	}
 }
 
+// TestCheckExitCodesFollowState drives the state machine from the thresholds:
+// a warn band nearly every volume falls into gives exit 1, and a critical band
+// nearly every volume falls into gives exit 2.
+func TestCheckExitCodesFollowState(t *testing.T) {
+	bands := func(criticalBelow, criticalAbove string) string {
+		return `
+[disk.warn]
+when_free_below  = ["99%"]
+clear_when_above = ["99.5%"]
+[disk.critical]
+when_free_below  = ["` + criticalBelow + `"]
+clear_when_above = ["` + criticalAbove + `"]
+[[dir_rules]]
+rule_name = "maven-repository"
+path      = "~/.m2/repository"
+max_size  = "1GB"
+`
+	}
+	h := newHarness(t)
+	h.writeConfig(t, bands("0.1%", "0.2%"))
+	if code := h.run("check"); code != 1 {
+		t.Fatalf("warn exit = %d, want 1, stderr %s", code, h.stderr.String())
+	}
+	if st := h.statusFile(t); st.Disk.State != "warn" || st.Summary.State != "warn" {
+		t.Errorf("state = %q, summary %q, want warn", st.Disk.State, st.Summary.State)
+	}
+	sd, _ := state.DefaultDir(func(string) string { return "" }, h.home)
+	prompt, _ := sd.ReadPrompt()
+	if !strings.Contains(prompt, "% free") {
+		t.Errorf("warn prompt = %q, want the warn template", prompt)
+	}
+
+	h.now = h.now.Add(time.Minute)
+	h.writeConfig(t, bands("99.9%", "99.95%"))
+	if code := h.run("check"); code != 2 {
+		t.Fatalf("critical exit = %d, want 2, stderr %s", code, h.stderr.String())
+	}
+	if st := h.statusFile(t); st.Disk.State != "critical" || st.Summary.State != "critical" {
+		t.Errorf("state = %q, summary %q, want critical", st.Disk.State, st.Summary.State)
+	}
+	prompt, _ = sd.ReadPrompt()
+	if !strings.Contains(prompt, "GB free!") {
+		t.Errorf("critical prompt = %q, want the critical template", prompt)
+	}
+}
+
 func TestStatusCommand(t *testing.T) {
 	h := newHarness(t)
 	h.writeConfig(t, lenientConfig)
