@@ -1,0 +1,91 @@
+# GoReleaser configuration for dusk.
+# Reference: https://goreleaser.com
+version: 2
+
+project_name: dusk
+
+before:
+  hooks:
+    - go mod tidy
+
+# dusk is pure Go. The one libSystem call it needs (setiopolicy_np) goes
+# through purego, so the binaries are built without cgo and are statically
+# linked. Both darwin slices come from one build definition.
+builds:
+  - id: dusk
+    main: ./cmd/dusk
+    binary: dusk
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+    goarch:
+      - arm64
+      - amd64
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .Commit }}
+      - -X main.date={{ .Date }}
+
+# A tag carrying a prerelease part (v0.1.0-rc.1) is published as a GitHub
+# prerelease and is not marked Latest. release.prerelease is only inferred
+# from the tag when it is set to "auto".
+release:
+  prerelease: auto
+
+archives:
+  - id: dusk
+    ids:
+      - dusk
+    formats:
+      - tar.gz
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+      - Merge pull request
+      - Merge branch
+
+# The brews section is deprecated in GoReleaser v2 in favour of
+# homebrew_casks, but casks distribute quarantined downloads that Gatekeeper
+# blocks for unsigned binaries. A formula installs into the Homebrew prefix,
+# which is exempt from quarantine, so the deprecation notice is accepted
+# until signing and notarisation are in place.
+brews:
+  - name: dusk
+    # Keep prerelease tags out of the tap. GoReleaser skips the upload when
+    # the tag carries a prerelease part and skip_upload is the literal "auto".
+    skip_upload: auto
+    directory: Formula
+    repository:
+      owner: geraldcsoftware
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: "https://github.com/geraldcsoftware/disk-usage-cli"
+    description: "Disk usage keeper for macOS: free space alerts and directory size limits"
+    license: MIT
+    # The safe deletion path needs unlinkat(2) with AT_RESOLVE_BENEATH, which
+    # the kernel first honours in macOS 26.0. Older releases return EINVAL.
+    custom_block: |
+      depends_on macos: :tahoe
+    dependencies:
+      - name: terminal-notifier
+    install: |
+      bin.install "dusk"
+    test: |
+      system "#{bin}/dusk", "version"
