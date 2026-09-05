@@ -152,8 +152,9 @@ func (s *session) requireHome() error {
 }
 
 // loadConfig parses and validates the config. Warnings are returned for the
-// caller to print; errors carry ExitConfig.
-func (s *session) loadConfig() (*config.Config, []string, error) {
+// caller to print; errors carry ExitConfig. external turns on the validation
+// checks that run tmutil and search the PATH, which only config validate wants.
+func (s *session) loadConfig(external bool) (*config.Config, []string, error) {
 	if err := s.requireHome(); err != nil {
 		return nil, nil, err
 	}
@@ -161,7 +162,9 @@ func (s *session) loadConfig() (*config.Config, []string, error) {
 	if err != nil {
 		return nil, nil, exitWith(ExitConfig, fmt.Errorf("%s: %w", s.configPath, err))
 	}
-	warnings, err := cfg.Validate(config.DefaultValidator(s.home))
+	v := config.DefaultValidator(s.home)
+	v.CheckExternal = external
+	warnings, err := cfg.Validate(v)
 	if err != nil {
 		return nil, warnings, exitWith(ExitConfig, fmt.Errorf("%s: %w", s.configPath, err))
 	}

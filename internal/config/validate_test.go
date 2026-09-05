@@ -30,6 +30,7 @@ func testValidator(home string) Validator {
 		PATH:                filepath.Join(home, "bin"),
 		Lstat:               os.Lstat,
 		TimeMachineIncluded: func(string) (bool, error) { return false, nil },
+		CheckExternal:       true,
 	}
 }
 
@@ -131,6 +132,32 @@ func TestValidateWarnings(t *testing.T) {
 	for _, want := range []string{"does not exist yet", "nosuchtool", "Time Machine"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("warnings %q lack %q", joined, want)
+		}
+	}
+}
+
+func TestValidateSkipsExternalChecksByDefault(t *testing.T) {
+	home := fakeHome(t)
+	src := "[[dir_rules]]\nrule_name = \"missing\"\npath = \"~/not-yet\"\nmax_size = \"1GB\"\n" +
+		"[[command_rules]]\nrule_name = \"c\"\npath = \"~/Library/Caches/x\"\nmax_size = \"1GB\"\ncleanup_command = [\"nosuchtool\", \"prune\"]\n"
+	cfg := parseFor(t, home, src)
+	v := testValidator(home)
+	v.CheckExternal = false
+	v.TimeMachineIncluded = func(string) (bool, error) {
+		t.Error("Time Machine must not be consulted when CheckExternal is false")
+		return true, nil
+	}
+	warnings, err := cfg.Validate(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(warnings, "\n")
+	if !strings.Contains(joined, "does not exist yet") {
+		t.Errorf("warnings %q lack the missing path warning", joined)
+	}
+	for _, unwanted := range []string{"nosuchtool", "Time Machine"} {
+		if strings.Contains(joined, unwanted) {
+			t.Errorf("warnings %q mention %q, which needs an external check", joined, unwanted)
 		}
 	}
 }

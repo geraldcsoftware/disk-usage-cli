@@ -27,12 +27,9 @@ func newCheckCmd(s *session) *cobra.Command {
 		Long:  "check is the scheduled entry point. Exit code 0 means ok, 1 warn, 2 critical and 3 unknown (statfs failed or the config is invalid).",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, warnings, err := s.loadConfig()
+			cfg, _, err := s.loadConfig(false)
 			if err != nil {
 				return exitWith(ExitUnknown, err)
-			}
-			for _, w := range warnings {
-				fmt.Fprintln(s.app.Stderr, "warning:", w)
 			}
 			dir, err := s.stateDir()
 			if err != nil {

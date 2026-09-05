@@ -24,6 +24,11 @@ type Validator struct {
 	PATH                string
 	Lstat               func(string) (os.FileInfo, error)
 	TimeMachineIncluded func(string) (bool, error)
+	// CheckExternal enables the checks that leave the process: the Time
+	// Machine lookup, which runs tmutil once per rule, and the binary
+	// lookups, which walk dusk's PATH. Only config validate sets it, so the
+	// scheduled and prompt paths neither exec nor scan the PATH.
+	CheckExternal bool
 }
 
 // DefaultValidator uses the real filesystem, dusk's fixed PATH and tmutil.
@@ -156,13 +161,16 @@ func (c *Config) Validate(v Validator) ([]string, error) {
 				fail("command rule %q: %s may not start with %q; file deletion belongs in dir_rules", r.RuleName, field, argv[0])
 				continue
 			}
+			if !v.CheckExternal {
+				continue
+			}
 			if _, err := LookPath(argv[0], v.PATH); err != nil {
 				warn("command rule %q: %s binary %q not found on dusk's PATH", r.RuleName, field, argv[0])
 			}
 		}
 		if _, err := v.Lstat(r.Path); errors.Is(err, os.ErrNotExist) {
 			warn("command rule %q: path %s does not exist yet", r.RuleName, r.Path)
-		} else if err == nil {
+		} else if err == nil && v.CheckExternal {
 			if included, terr := v.TimeMachineIncluded(filepath.Clean(r.Path)); terr == nil && included {
 				warn("command rule %q: path %s is included in Time Machine backups", r.RuleName, r.Path)
 			}
@@ -194,7 +202,7 @@ func (c *Config) validateDirPath(r *DirRule, v Validator, fail, warn func(string
 	}
 	if _, err := v.Lstat(resolved); errors.Is(err, os.ErrNotExist) {
 		warn("dir rule %q: path %s does not exist yet", r.RuleName, r.Path)
-	} else if err == nil {
+	} else if err == nil && v.CheckExternal {
 		if included, terr := v.TimeMachineIncluded(resolved); terr == nil && included {
 			warn("dir rule %q: path %s is included in Time Machine backups", r.RuleName, r.Path)
 		}

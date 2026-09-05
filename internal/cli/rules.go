@@ -30,7 +30,7 @@ func newRulesCmd(s *session) *cobra.Command {
 		Short: "Print the resolved rules with their last measured size",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, _, err := s.loadConfig()
+			cfg, _, err := s.loadConfig(false)
 			if err != nil {
 				return err
 			}

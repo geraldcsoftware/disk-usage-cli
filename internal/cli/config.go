@@ -29,7 +29,7 @@ func newConfigCmd(s *session) *cobra.Command {
 		Short: "Parse and check the config file",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			_, warnings, err := s.loadConfig()
+			_, warnings, err := s.loadConfig(true)
 			if err != nil {
 				var ve *config.ValidationError
 				if errors.As(err, &ve) {

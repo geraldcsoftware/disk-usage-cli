@@ -48,7 +48,7 @@ func newReportCmd(s *session) *cobra.Command {
 		Short: "Measure now and print every rule against its maximum with growth",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, _, err := s.loadConfig()
+			cfg, _, err := s.loadConfig(false)
 			if err != nil {
 				return err
 			}
