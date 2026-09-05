@@ -200,11 +200,18 @@ func (c *Config) validateDirPath(r *DirRule, v Validator, fail, warn func(string
 	if parent, err := filepath.EvalSymlinks(filepath.Dir(clean)); err == nil {
 		resolved = filepath.Join(parent, filepath.Base(clean))
 	}
-	if _, err := v.Lstat(resolved); errors.Is(err, os.ErrNotExist) {
+	if fi, err := v.Lstat(resolved); errors.Is(err, os.ErrNotExist) {
 		warn("dir rule %q: path %s does not exist yet", r.RuleName, r.Path)
-	} else if err == nil && v.CheckExternal {
-		if included, terr := v.TimeMachineIncluded(resolved); terr == nil && included {
-			warn("dir rule %q: path %s is included in Time Machine backups", r.RuleName, r.Path)
+	} else if err == nil {
+		// Lstat does not follow the final component, so a symlink to a
+		// directory is rejected too: the scanner never leaves the rule path.
+		if !fi.IsDir() {
+			fail("dir rule %q: path %s is not a directory", r.RuleName, r.Path)
+		}
+		if v.CheckExternal {
+			if included, terr := v.TimeMachineIncluded(resolved); terr == nil && included {
+				warn("dir rule %q: path %s is included in Time Machine backups", r.RuleName, r.Path)
+			}
 		}
 	}
 

@@ -21,6 +21,12 @@ func fakeHome(t *testing.T) string {
 	if err := os.WriteFile(filepath.Join(home, "bin", "brew"), []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(home, "notes.txt"), []byte("a file, not a directory\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(home, ".m2", "repository"), filepath.Join(home, "repository-link")); err != nil {
+		t.Fatal(err)
+	}
 	return home
 }
 
@@ -73,6 +79,8 @@ func TestValidateErrors(t *testing.T) {
 		{"cloudstorage child", dir("a", "~/Library/CloudStorage/OneDrive-Personal/b", ""), "denied"},
 		{"photos library", dir("a", "~/Pictures/Photos Library.photoslibrary/inner", ""), "denied"},
 		{"desktop without flag", dir("a", "~/Desktop/scratch", ""), "contains_user_data"},
+		{"regular file", dir("a", "~/notes.txt", ""), "not a directory"},
+		{"symlink to a directory", dir("a", "~/repository-link", ""), "not a directory"},
 		{"target not below max", dir("a", "~/.m2/repository", "cleanup_target_size = \"1GB\""), "cleanup_target_size"},
 		{"bad mode", dir("a", "~/.m2/repository", "cleanup_mode = \"prune\""), "cleanup_mode"},
 		{"bad unit", dir("a", "~/.m2/repository", "cleanup_unit = \"dirs\""), "cleanup_unit"},

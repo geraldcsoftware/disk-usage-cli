@@ -197,6 +197,28 @@ func TestStatusNeedsNoConfig(t *testing.T) {
 	}
 }
 
+func TestCheckLeavesUnmeasurableRuleUnmeasured(t *testing.T) {
+	h := newHarness(t)
+	h.writeConfig(t, lenientConfig+"\n[[dir_rules]]\nrule_name = \"gone\"\npath = \"~/gone\"\nmax_size = \"1KB\"\n")
+	if code := h.run("check"); code != 0 {
+		t.Fatalf("exit %d, stderr %s", code, h.stderr.String())
+	}
+	if !strings.Contains(h.stderr.String(), "not measured") {
+		t.Errorf("stderr %q lacks the not measured warning", h.stderr.String())
+	}
+	st := h.statusFile(t)
+	if len(st.Rules) != 2 {
+		t.Fatalf("rules = %+v", st.Rules)
+	}
+	gone := st.Rules[1]
+	if gone.RuleName != "gone" || gone.MeasuredAt != nil || gone.OverMax || gone.AllocatedBytes != 0 {
+		t.Errorf("unmeasurable rule = %+v, want no measurement time and no size", gone)
+	}
+	if code := h.run("status"); code != 0 || !strings.Contains(h.stdout.String(), "never") {
+		t.Errorf("status: exit %d, out %q", code, h.stdout.String())
+	}
+}
+
 func TestCheckExitCodesAndLock(t *testing.T) {
 	h := newHarness(t)
 	if code := h.run("check"); code != ExitUnknown {

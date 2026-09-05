@@ -79,7 +79,13 @@ func runCheck(s *session, cfg *config.Config, dir state.Dir, full bool) (policy.
 	var rules []state.RuleStatus
 	samples := []state.Sample{}
 	if full || snap.State == policy.Critical || measurementDue(prev, cfg.Rules(), cfg.Schedule.MeasureRuleDirsEvery.Std(), now) {
-		rules, samples, _ = measureRules(cfg, s.home, now, false)
+		var measurements []ruleMeasurement
+		rules, samples, measurements = measureRules(cfg, s.home, now, false)
+		for _, m := range measurements {
+			if m.Err != nil {
+				fmt.Fprintf(s.app.Stderr, "warning: rule %q not measured: %v\n", m.Ref.Name, m.Err)
+			}
+		}
 	} else {
 		rules = prev.Rules
 	}
@@ -93,9 +99,7 @@ func runCheck(s *session, cfg *config.Config, dir state.Dir, full bool) (policy.
 		if r.OverMax {
 			overMax++
 		}
-		if r.Unmeasured.PrivacyProtected > 0 {
-			unmeasuredRoots++
-		}
+		unmeasuredRoots += r.Unmeasured.PrivacyProtected
 	}
 	status := &state.Status{
 		Schema:     1,

@@ -55,6 +55,9 @@ type RuleStatus struct {
 	Unmeasured     Unmeasured `json:"unmeasured"`
 }
 
+// Unmeasured records what a rule's total leaves out. PrivacyProtected counts
+// the privacy protected roots the scan could not enter; CloudOnly counts the
+// entries skipped because they are cloud only placeholders.
 type Unmeasured struct {
 	PrivacyProtected int `json:"privacy_protected"`
 	CloudOnly        int `json:"cloud_only"`

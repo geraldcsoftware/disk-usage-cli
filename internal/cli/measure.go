@@ -19,7 +19,8 @@ type ruleMeasurement struct {
 }
 
 // measureRules scans every rule path. A path that cannot be scanned yields a
-// status with zero size and the error in the measurement; it never aborts.
+// status with no measurement time, so it reads as never measured and the next
+// run tries again; the error travels in the measurement. It never aborts.
 func measureRules(cfg *config.Config, home string, now time.Time, collectUnits bool) ([]state.RuleStatus, []state.Sample, []ruleMeasurement) {
 	refs := cfg.Rules()
 	statuses := make([]state.RuleStatus, 0, len(refs))
@@ -32,14 +33,15 @@ func measureRules(cfg *config.Config, home string, now time.Time, collectUnits b
 		}
 		res, err := scan.Scan(ref.Path, scan.Options{Unit: unit, CollectUnits: collectUnits, Home: home})
 		measurements = append(measurements, ruleMeasurement{Ref: ref, Result: res, Err: err})
-		measured := now
 		rs := state.RuleStatus{
-			RuleName: ref.Name, Kind: ref.Kind, MaxBytes: int64(ref.MaxSize), AutoCleanup: ref.AutoCleanup, MeasuredAt: &measured,
+			RuleName: ref.Name, Kind: ref.Kind, MaxBytes: int64(ref.MaxSize), AutoCleanup: ref.AutoCleanup,
 		}
 		if err == nil {
+			measured := now
+			rs.MeasuredAt = &measured
 			rs.AllocatedBytes = res.Allocated
 			rs.OverMax = policy.OverMax(res.Allocated, int64(ref.MaxSize))
-			rs.Unmeasured = state.Unmeasured{PrivacyProtected: res.Skipped[scan.ClassPrivacyProtected], CloudOnly: res.Skipped[scan.ClassCloudOnly]}
+			rs.Unmeasured = state.Unmeasured{PrivacyProtected: len(res.UnmeasuredRoots), CloudOnly: res.Skipped[scan.ClassCloudOnly]}
 			samples = append(samples, state.Sample{TS: now, Rule: ref.Name, Allocated: res.Allocated, Apparent: res.Apparent, CloudOnly: res.CloudOnly, Units: res.FileCount})
 		}
 		statuses = append(statuses, rs)
