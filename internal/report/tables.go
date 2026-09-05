@@ -79,10 +79,10 @@ func WriteStatus(w io.Writer, st *state.Status, f Format, pal Palette, now time.
 
 // ReportUnit is one of the largest units of a rule.
 type ReportUnit struct {
-	RelPath   string
-	Allocated int64
-	ModTime   time.Time
-	Freeable  bool
+	RelPath   string    `json:"rel_path"`
+	Allocated int64     `json:"allocated_bytes"`
+	ModTime   time.Time `json:"mod_time"`
+	Freeable  bool      `json:"freeable"`
 }
 
 // ReportRule is one rule measured now.

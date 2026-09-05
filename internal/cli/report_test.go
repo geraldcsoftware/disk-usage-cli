@@ -93,12 +93,23 @@ func TestReportCommand(t *testing.T) {
 	}
 	var raw struct {
 		Rules []struct {
-			Name     string `json:"name"`
-			Growth7d *int64 `json:"growth_7d_bytes"`
-			Err      string `json:"error"`
+			Name     string           `json:"name"`
+			Growth7d *int64           `json:"growth_7d_bytes"`
+			Err      string           `json:"error"`
+			Largest  []map[string]any `json:"largest"`
 		} `json:"rules"`
 	}
 	if err := json.Unmarshal(h.stdout.Bytes(), &raw); err != nil || len(raw.Rules) != 2 || raw.Rules[0].Growth7d == nil || raw.Rules[1].Err == "" {
-		t.Errorf("report --json = %s, %v", h.stdout.String(), err)
+		t.Fatalf("report --json = %s, %v", h.stdout.String(), err)
+	}
+	if len(raw.Rules[0].Largest) == 0 {
+		t.Fatalf("report --json has no largest units: %s", h.stdout.String())
+	}
+	largest := raw.Rules[0].Largest[0]
+	if largest["rel_path"] != "big.jar" {
+		t.Errorf("largest[0].rel_path = %v, want big.jar", largest["rel_path"])
+	}
+	if _, ok := largest["allocated_bytes"]; !ok {
+		t.Errorf("largest[0] lacks allocated_bytes: %v", largest)
 	}
 }
