@@ -17,3 +17,7 @@ coverage.*
 
 # Local tooling state
 .claude/settings.local.json
+
+# The workflows are part of the repository. This overrides a global ignore
+# rule for .github/ that would otherwise drop them from every commit.
+!.github/

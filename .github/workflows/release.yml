@@ -1,0 +1,47 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  # Required for GoReleaser to create the GitHub Release on this repository.
+  contents: write
+
+jobs:
+  goreleaser:
+    # macOS because dusk is darwin only and its tests run against APFS. The
+    # binaries themselves are built without cgo. Pinned to the same image as
+    # ci.yml so a release never runs on an image the tests have not seen.
+    runs-on: macos-26
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # GoReleaser needs the full history and all tags to compute the
+          # version and build the changelog.
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test
+        run: CGO_ENABLED=0 go test ./...
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          # Creates the release on this repo.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Pushes the Homebrew formula to geraldcsoftware/homebrew-tap.
+          # GITHUB_TOKEN cannot write to another repository, so this is a
+          # personal access token with write access to the tap.
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}

@@ -1,0 +1,95 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+# Nothing in this workflow writes to the repository.
+permissions:
+  contents: read
+
+# A second push to a branch makes the run already in flight redundant. Cancel
+# it there, but keep every result on main, where each commit's status is the
+# record of whether that commit was good.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Every job runs on macOS because dusk is darwin only: its packages carry a
+# darwin build tag and its tests exercise APFS behaviour. The image is pinned
+# to macos-26 rather than macos-latest: the latest label migrates gradually
+# between images, and the runner capabilities the test suites rely on
+# (hdiutil without sudo, an Aqua launchd session) were verified on this one.
+jobs:
+  test:
+    runs-on: macos-26
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "Not gofmt'd:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: CGO_ENABLED=0 go vet ./...
+
+      - name: Test
+        run: CGO_ENABLED=0 go test -race ./...
+
+  modules:
+    runs-on: macos-26
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Before tidy, so this checks the committed go.sum rather than one this
+      # job has just rewritten.
+      - name: Module cache matches go.sum
+        run: go mod verify
+
+      - name: go.mod and go.sum are tidy
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
+  govulncheck:
+    # Matches reachable call paths against advisories. Deliberately not a
+    # required check, so an advisory with no fix available cannot deadlock
+    # every merge.
+    runs-on: macos-26
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # @latest on purpose: a scanner pinned to an old release stops finding
+      # new advisories.
+      - name: Run govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...

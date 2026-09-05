@@ -13,9 +13,13 @@ Disk usage keeper for macOS. A command line tool that monitors free space, flags
 
 ## Status
 
-In design. No releases yet.
+In development. No releases yet. Progress is tracked on the [wayfinder map](https://github.com/geraldcsoftware/disk-usage-cli/issues/1), which links the design specification and the milestone issues for the staged prereleases v0.1.0 to v0.4.0.
+
+## Licence
+
+MIT. See [LICENSE](LICENSE).
 
 ## Requirements
 
-- macOS 13 or later on Apple silicon or Intel.
+- macOS 26 (Tahoe) or later on Apple silicon or Intel. The safe deletion path relies on `unlinkat(2)` flags that earlier kernels reject.
 - Go 1.27 to build from source.
