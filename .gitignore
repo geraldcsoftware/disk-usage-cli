@@ -1,0 +1,19 @@
+# Build output
+/bin/
+/dist/
+/dusk
+*.test
+*.out
+
+# Coverage and profiling
+coverage.*
+*.prof
+
+# Editor and OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Local tooling state
+.claude/settings.local.json
