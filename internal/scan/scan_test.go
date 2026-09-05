@@ -77,6 +77,38 @@ func TestHardLinksCountOnceAndAreNotFreeable(t *testing.T) {
 		if u.Freeable {
 			t.Errorf("%s: hard linked unit must not be freeable", u.RelPath)
 		}
+		if u.Allocated != 8192 {
+			t.Errorf("%s: allocated = %d, want each hard linked name to report its own size", u.RelPath, u.Allocated)
+		}
+	}
+}
+
+func TestHardLinksAcrossTopLevelDirsReportOwnSize(t *testing.T) {
+	root := t.TempDir()
+	write(t, filepath.Join(root, "A", "a"), 8192)
+	if err := os.MkdirAll(filepath.Join(root, "B"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(filepath.Join(root, "A", "a"), filepath.Join(root, "B", "b")); err != nil {
+		t.Fatal(err)
+	}
+	res, err := Scan(root, Options{CollectUnits: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Allocated != 8192 {
+		t.Errorf("allocated = %d, want 8192 counted once", res.Allocated)
+	}
+	if len(res.Units) != 2 {
+		t.Fatalf("units = %d, want both names", len(res.Units))
+	}
+	for _, u := range res.Units {
+		if u.Freeable {
+			t.Errorf("%s: hard linked unit must not be freeable", u.RelPath)
+		}
+		if u.Allocated != 8192 {
+			t.Errorf("%s: allocated = %d, want each hard linked name to report its own size", u.RelPath, u.Allocated)
+		}
 	}
 }
 
@@ -177,6 +209,27 @@ func TestSQLiteCompanionsAreGrouped(t *testing.T) {
 	}
 	if unitByPath(res.Units, "other.db-journal") == nil {
 		t.Error("a companion without its base file stays its own unit")
+	}
+}
+
+func TestSQLiteCompanionChainIsGrouped(t *testing.T) {
+	root := t.TempDir()
+	for _, n := range []string{"x.db", "x.db-wal", "x.db-wal-journal"} {
+		write(t, filepath.Join(root, n), 4096)
+	}
+	res, err := Scan(root, Options{CollectUnits: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	db := unitByPath(res.Units, "x.db")
+	if db == nil || db.Allocated != 3*4096 {
+		t.Errorf("x.db = %+v, want the whole chain folded in", db)
+	}
+	if unitByPath(res.Units, "x.db-wal") != nil {
+		t.Error("x.db-wal must not remain a separate unit")
+	}
+	if unitByPath(res.Units, "x.db-wal-journal") != nil {
+		t.Error("x.db-wal-journal must not remain a separate unit")
 	}
 }
 

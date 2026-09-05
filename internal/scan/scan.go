@@ -206,6 +206,9 @@ func (s *scanner) walkDir(rel, abs string, st unix.Stat_t) subtree {
 }
 
 // file accounts for a regular file, symlink or other non directory inode.
+// A hard linked name always reports its own size in its unit; the totals
+// that flow into Result count the inode's bytes once, on whichever name is
+// walked first, and every hard linked unit is not freeable.
 func (s *scanner) file(rel string, st unix.Stat_t, topLevel bool) subtree {
 	alloc := sys.AllocatedBytes(&st)
 	apparent := st.Size
@@ -215,13 +218,14 @@ func (s *scanner) file(rel string, st unix.Stat_t, topLevel bool) subtree {
 		alloc = 0
 	}
 	freeable := true
+	totalAlloc, totalApparent, totalCloud := alloc, apparent, cloud
 	if st.Nlink > 1 {
 		freeable = false
 		if s.markSeen(st.Dev, st.Ino) {
-			alloc, apparent, cloud = 0, 0, 0
+			totalAlloc, totalApparent, totalCloud = 0, 0, 0
 		}
 	}
-	sub := subtree{allocated: alloc, apparent: apparent, cloudOnly: cloud, files: 1, newest: sys.ModTime(&st)}
+	sub := subtree{allocated: totalAlloc, apparent: totalApparent, cloudOnly: totalCloud, files: 1, newest: sys.ModTime(&st)}
 	if s.opts.CollectUnits && (s.opts.Unit == "files" || topLevel) {
 		sub.units = []Unit{{RelPath: rel, Allocated: alloc, Apparent: apparent, CloudOnly: cloud, ModTime: sub.newest, Dev: st.Dev, Ino: st.Ino, Freeable: freeable}}
 	}
@@ -258,7 +262,9 @@ var sqliteCompanionSuffixes = []string{"-wal", "-shm", "-journal"}
 
 // groupSQLiteCompanions folds write ahead logs, shared memory files and
 // rollback journals into the unit of their database file, so a plan never
-// removes one without the others.
+// removes one without the others. A companion of an already folded
+// companion (for example a rollback journal of a write ahead log) is chased
+// forward to the unit that still survives in the output.
 func groupSQLiteCompanions(units []Unit) []Unit {
 	index := make(map[string]int, len(units))
 	for i, u := range units {
@@ -271,7 +277,17 @@ func groupSQLiteCompanions(units []Unit) []Unit {
 				continue
 			}
 			base, ok := index[strings.TrimSuffix(u.RelPath, suffix)]
-			if !ok || base == i {
+			if !ok {
+				continue
+			}
+			for drop[base] {
+				next, ok := companionBase(units[base].RelPath, index)
+				if !ok {
+					break
+				}
+				base = next
+			}
+			if base == i {
 				continue
 			}
 			b := &units[base]
@@ -295,4 +311,18 @@ func groupSQLiteCompanions(units []Unit) []Unit {
 		}
 	}
 	return out
+}
+
+// companionBase reports the index of the base file for a companion's own
+// RelPath, so a chain of companions can be followed to its root.
+func companionBase(relPath string, index map[string]int) (int, bool) {
+	for _, suffix := range sqliteCompanionSuffixes {
+		if !strings.HasSuffix(relPath, suffix) {
+			continue
+		}
+		if base, ok := index[strings.TrimSuffix(relPath, suffix)]; ok {
+			return base, true
+		}
+	}
+	return 0, false
 }
