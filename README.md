@@ -34,7 +34,11 @@ dusk status
 dusk report
 ```
 
-The LaunchAgent arrives in a later prerelease. Until then a cron entry runs the check every thirty minutes:
+The LaunchAgent arrives in a later prerelease. Until then a cron entry runs the check every thirty minutes. The redirect below appends to a log file, and cron does not create directories, so make the log directory first:
+
+```sh
+mkdir -p ~/Library/Logs/dusk
+```
 
 ```
 5,35 * * * * $HOME/.local/bin/dusk check >> $HOME/Library/Logs/dusk/cron.log 2>&1
