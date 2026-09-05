@@ -163,8 +163,37 @@ func TestPromptSurvivesBrokenConfig(t *testing.T) {
 	if code := h.run("status", "--prompt"); code != 0 || h.stdout.String() != "· 1 over max" || h.stderr.String() != "" {
 		t.Errorf("prompt with broken config: exit %d, out %q, err %q", code, h.stdout.String(), h.stderr.String())
 	}
-	if code := h.run("status"); code != ExitConfig {
-		t.Errorf("status with broken config: exit %d, want %d", code, ExitConfig)
+	if code := h.run("status"); code != 0 || !strings.Contains(h.stdout.String(), "state ok") {
+		t.Errorf("status with broken config: exit %d, out %q, err %q", code, h.stdout.String(), h.stderr.String())
+	}
+
+	dir, _ := state.DefaultDir(func(string) string { return "" }, h.home)
+	raw, err := os.ReadFile(dir.Path("status.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dir.Path("status.json"), raw[:40], 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code := h.run("status", "--prompt"); code != 0 || h.stdout.String() != "" || h.stderr.String() != "" {
+		t.Errorf("prompt with torn status: exit %d, out %q, err %q", code, h.stdout.String(), h.stderr.String())
+	}
+	if code := h.run("status"); code != ExitUnknown {
+		t.Errorf("status with torn status: exit %d, want %d", code, ExitUnknown)
+	}
+}
+
+func TestStatusNeedsNoConfig(t *testing.T) {
+	h := newHarness(t)
+	h.writeConfig(t, lenientConfig)
+	if code := h.run("check"); code != 0 {
+		t.Fatal(h.stderr.String())
+	}
+	if err := os.Remove(filepath.Join(h.home, ".config", "dusk", "config.toml")); err != nil {
+		t.Fatal(err)
+	}
+	if code := h.run("status"); code != 0 || !strings.Contains(h.stdout.String(), "state ok") {
+		t.Errorf("status without a config: exit %d, out %q, err %q", code, h.stdout.String(), h.stderr.String())
 	}
 }
 
