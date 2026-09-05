@@ -119,7 +119,7 @@ func newRoot(app *App) *cobra.Command {
 	pf.BoolVar(&s.iec, "iec", false, "print sizes in GiB and MiB instead of GB and MB")
 	pf.StringVar(&s.color, "color", "auto", "colour output: always, never or auto")
 
-	root.AddCommand(newVersionCmd(s), newConfigCmd(s), newRulesCmd(s), newStatusCmd(s), newCheckCmd(s))
+	root.AddCommand(newVersionCmd(s), newConfigCmd(s), newRulesCmd(s), newStatusCmd(s), newCheckCmd(s), newReportCmd(s))
 	return root
 }
 
