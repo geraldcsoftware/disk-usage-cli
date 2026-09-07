@@ -13,7 +13,45 @@ Disk usage keeper for macOS. A command line tool that monitors free space, flags
 
 ## Status
 
-In development. No releases yet. Progress is tracked on the [wayfinder map](https://github.com/geraldcsoftware/disk-usage-cli/issues/1), which links the design specification and the milestone issues for the staged prereleases v0.1.0 to v0.4.0.
+Prerelease. Progress is tracked on the [wayfinder map](https://github.com/geraldcsoftware/disk-usage-cli/issues/1), which links the design specification and the milestone issues for the staged prereleases v0.1.0 to v0.4.0. Prereleases publish to GitHub only; the Homebrew formula arrives with v1.0.0.
+
+## Trying the prerelease
+
+Download the archive for your architecture from the latest prerelease, unpack it, and put `dusk` on your PATH:
+
+```sh
+tar -xzf dusk_*_darwin_arm64.tar.gz
+install -m 0755 dusk ~/.local/bin/dusk
+dusk version
+```
+
+Write a config at `~/.config/dusk/config.toml` (see the design specification, section 6), then:
+
+```sh
+dusk config validate
+dusk check --full
+dusk status
+dusk report
+```
+
+The LaunchAgent arrives in a later prerelease. Until then a cron entry runs the check every thirty minutes. The redirect below appends to a log file, and cron does not create directories, so make the log directory first:
+
+```sh
+mkdir -p ~/Library/Logs/dusk
+```
+
+```
+5,35 * * * * $HOME/.local/bin/dusk check >> $HOME/Library/Logs/dusk/cron.log 2>&1
+```
+
+Starship reads the status with:
+
+```toml
+[custom.dusk]
+command = "dusk status --prompt"
+when    = true
+style   = "bold yellow"
+```
 
 ## Licence
 

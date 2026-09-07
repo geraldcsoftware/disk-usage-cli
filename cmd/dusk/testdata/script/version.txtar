@@ -1,0 +1,12 @@
+# version prints build information and unknown commands are usage errors
+exec dusk version
+stdout '^dusk dev \(commit none, built unknown\)$'
+
+exit 64 dusk frobnicate
+stderr 'unknown command'
+
+exit 64 dusk version --bogus
+stderr 'unknown flag'
+
+exec dusk completion zsh
+stdout 'compdef'

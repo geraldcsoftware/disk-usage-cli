@@ -1,14 +1,15 @@
 // Command dusk is a disk usage keeper for macOS.
-//
-// This entry point currently exposes only the version subcommand so that the
-// continuous integration and release pipelines have a binary to build and the
-// Homebrew formula test has something to run. The full command set is added
-// milestone by milestone.
 package main
 
 import (
 	"fmt"
 	"os"
+	"time"
+
+	"golang.org/x/term"
+
+	"github.com/geraldcsoftware/disk-usage-cli/internal/cli"
+	"github.com/geraldcsoftware/disk-usage-cli/internal/sys"
 )
 
 // Set at build time by GoReleaser through -ldflags "-X main.version=...".
@@ -18,17 +19,24 @@ var (
 	date    = "unknown"
 )
 
-const usage = "usage: dusk version\n"
-
 func main() {
-	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+	os.Exit(realMain())
 }
 
-func run(args []string, stdout, stderr *os.File) int {
-	if len(args) == 1 && args[0] == "version" {
-		fmt.Fprintf(stdout, "dusk %s (commit %s, built %s)\n", version, commit, date)
-		return 0
+// realMain disables dataless materialisation before any subcommand runs, so
+// no code path can download a cloud placeholder, then dispatches to the
+// command line.
+func realMain() int {
+	if err := sys.DisableDatalessMaterialisation(); err != nil {
+		fmt.Fprintln(os.Stderr, "dusk: cannot disable dataless materialisation:", err)
+		return cli.ExitUnknown
 	}
-	fmt.Fprint(stderr, usage)
-	return 64
+	return cli.Main(os.Args[1:], cli.App{
+		Info:             cli.BuildInfo{Version: version, Commit: commit, Date: date},
+		Stdout:           os.Stdout,
+		Stderr:           os.Stderr,
+		Getenv:           os.Getenv,
+		Now:              time.Now,
+		StdoutIsTerminal: term.IsTerminal(int(os.Stdout.Fd())),
+	})
 }

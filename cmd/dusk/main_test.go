@@ -1,51 +1,61 @@
 package main
 
 import (
+	"errors"
 	"os"
-	"strings"
+	"os/exec"
+	"path/filepath"
+	"strconv"
 	"testing"
+
+	"github.com/rogpeppe/go-internal/testscript"
 )
 
-func capture(t *testing.T, args []string) (code int, stdout, stderr string) {
-	t.Helper()
-	out, err := os.CreateTemp(t.TempDir(), "stdout")
-	if err != nil {
-		t.Fatal(err)
-	}
-	errf, err := os.CreateTemp(t.TempDir(), "stderr")
-	if err != nil {
-		t.Fatal(err)
-	}
-	code = run(args, out, errf)
-	o, _ := os.ReadFile(out.Name())
-	e, _ := os.ReadFile(errf.Name())
-	return code, string(o), string(e)
+func TestMain(m *testing.M) {
+	testscript.Main(m, map[string]func(){
+		"dusk": func() { os.Exit(realMain()) },
+	})
 }
 
-func TestVersionPrintsBuildInfo(t *testing.T) {
-	code, out, errOut := capture(t, []string{"version"})
-	if code != 0 {
-		t.Fatalf("exit code = %d, want 0", code)
-	}
-	if !strings.HasPrefix(out, "dusk dev (commit none, built unknown)") {
-		t.Fatalf("stdout = %q", out)
-	}
-	if errOut != "" {
-		t.Fatalf("stderr = %q, want empty", errOut)
-	}
-}
-
-func TestUnknownArgumentsAreUsageErrors(t *testing.T) {
-	for _, args := range [][]string{nil, {"help"}, {"version", "extra"}} {
-		code, out, errOut := capture(t, args)
-		if code != 64 {
-			t.Errorf("args %v: exit code = %d, want 64", args, code)
-		}
-		if out != "" {
-			t.Errorf("args %v: stdout = %q, want empty", args, out)
-		}
-		if errOut != usage {
-			t.Errorf("args %v: stderr = %q, want usage", args, errOut)
-		}
-	}
+func TestScripts(t *testing.T) {
+	testscript.Run(t, testscript.Params{
+		Dir: filepath.Join("testdata", "script"),
+		Setup: func(env *testscript.Env) error {
+			home := filepath.Join(env.WorkDir, "home")
+			for _, d := range []string{"config", "state", filepath.Join("home", ".m2", "repository")} {
+				if err := os.MkdirAll(filepath.Join(env.WorkDir, d), 0o755); err != nil {
+					return err
+				}
+			}
+			env.Setenv("HOME", home)
+			env.Setenv("XDG_CONFIG_HOME", filepath.Join(env.WorkDir, "config"))
+			env.Setenv("XDG_STATE_HOME", filepath.Join(env.WorkDir, "state"))
+			env.Setenv("NO_COLOR", "1")
+			return nil
+		},
+		Cmds: map[string]func(ts *testscript.TestScript, neg bool, args []string){
+			// exit <code> <command> [args...] runs the command and asserts its
+			// exit code exactly, which the built in exec cannot do.
+			"exit": func(ts *testscript.TestScript, neg bool, args []string) {
+				if len(args) < 2 {
+					ts.Fatalf("usage: exit <code> <command> [args...]")
+				}
+				want, err := strconv.Atoi(args[0])
+				if err != nil {
+					ts.Fatalf("exit: bad code %q", args[0])
+				}
+				err = ts.Exec(args[1], args[2:]...)
+				got := 0
+				var ee *exec.ExitError
+				if errors.As(err, &ee) {
+					got = ee.ExitCode()
+				} else if err != nil {
+					ts.Fatalf("exit: %v", err)
+				}
+				if (got == want) == neg {
+					ts.Fatalf("exit code %d, want %d", got, want)
+				}
+			},
+		},
+	})
 }

@@ -1,0 +1,320 @@
+//go:build darwin
+
+package cli
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/geraldcsoftware/disk-usage-cli/internal/state"
+)
+
+// lenientConfig keeps the disk in ok on any machine with more than one
+// percent free, so the tests exercise the pipeline rather than the state.
+const lenientConfig = `
+[disk.warn]
+when_free_below  = ["1%"]
+clear_when_above = ["2%"]
+[disk.critical]
+when_free_below  = ["0.5%"]
+clear_when_above = ["1%"]
+[schedule]
+measure_rule_dirs_every = "6h"
+[[dir_rules]]
+rule_name = "maven-repository"
+path      = "~/.m2/repository"
+max_size  = "1KB"
+`
+
+func (h *harness) statusFile(t *testing.T) *state.Status {
+	t.Helper()
+	dir, err := state.DefaultDir(func(string) string { return "" }, h.home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := dir.ReadStatus()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return st
+}
+
+func TestCheckWritesStatusPromptAndSamples(t *testing.T) {
+	h := newHarness(t)
+	h.writeConfig(t, lenientConfig)
+	if err := os.WriteFile(filepath.Join(h.home, ".m2", "repository", "big.jar"), make([]byte, 8192), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code := h.run("check"); code != 0 {
+		t.Fatalf("check exit %d, stderr %s", code, h.stderr.String())
+	}
+	st := h.statusFile(t)
+	if st.Schema != 1 || st.Disk.State != "ok" || !st.TS.Equal(h.now) || !st.StaleAfter.Equal(h.now.Add(time.Hour)) {
+		t.Errorf("status = %+v", st)
+	}
+	if len(st.Rules) != 1 || st.Rules[0].RuleName != "maven-repository" || !st.Rules[0].OverMax || st.Rules[0].AllocatedBytes < 8192 || st.Rules[0].MeasuredAt == nil {
+		t.Errorf("rules = %+v", st.Rules)
+	}
+	if st.Summary.OverMaxCount != 1 || st.Summary.State != "ok" || st.LastRun.ID == "" {
+		t.Errorf("summary = %+v, last run = %+v", st.Summary, st.LastRun)
+	}
+	dir, _ := state.DefaultDir(func(string) string { return "" }, h.home)
+	prompt, _ := dir.ReadPrompt()
+	if prompt != "· 1 over max" {
+		t.Errorf("prompt = %q", prompt)
+	}
+	samples, _ := dir.ReadSamples()
+	if len(samples) != 2 || samples[0].Rule != "maven-repository" || samples[1].Rule != state.DiskSampleRule {
+		t.Errorf("samples = %+v", samples)
+	}
+}
+
+func TestCheckCarriesRulesForwardUntilDue(t *testing.T) {
+	h := newHarness(t)
+	h.writeConfig(t, lenientConfig)
+	if code := h.run("check"); code != 0 {
+		t.Fatal(h.stderr.String())
+	}
+	first := h.statusFile(t)
+	h.now = h.now.Add(30 * time.Minute)
+	if code := h.run("check"); code != 0 {
+		t.Fatal(h.stderr.String())
+	}
+	second := h.statusFile(t)
+	if !second.Rules[0].MeasuredAt.Equal(*first.Rules[0].MeasuredAt) {
+		t.Error("rules must be carried forward before measure_rule_dirs_every elapses")
+	}
+	if !second.TS.Equal(h.now) {
+		t.Error("status.json must still be rewritten every check")
+	}
+	h.now = h.now.Add(6 * time.Hour)
+	if code := h.run("check"); code != 0 {
+		t.Fatal(h.stderr.String())
+	}
+	third := h.statusFile(t)
+	if !third.Rules[0].MeasuredAt.Equal(h.now) {
+		t.Error("rules must be re-measured once the interval has elapsed")
+	}
+	h.now = h.now.Add(time.Minute)
+	if code := h.run("check", "--full"); code != 0 {
+		t.Fatal(h.stderr.String())
+	}
+	if !h.statusFile(t).Rules[0].MeasuredAt.Equal(h.now) {
+		t.Error("--full forces measurement")
+	}
+	dir, _ := state.DefaultDir(func(string) string { return "" }, h.home)
+	samples, _ := dir.ReadSamples()
+	if len(samples) != 4+3 {
+		t.Errorf("samples = %d, want one disk sample per check and one rule sample per measurement", len(samples))
+	}
+}
+
+func TestCheckRemeasuresWhenRulesChange(t *testing.T) {
+	h := newHarness(t)
+	h.writeConfig(t, lenientConfig)
+	if code := h.run("check"); code != 0 {
+		t.Fatal(h.stderr.String())
+	}
+	h.now = h.now.Add(30 * time.Minute)
+	h.writeConfig(t, strings.Replace(lenientConfig, `max_size  = "1KB"`, `max_size  = "2KB"`, 1))
+	if code := h.run("check"); code != 0 {
+		t.Fatal(h.stderr.String())
+	}
+	st := h.statusFile(t)
+	if len(st.Rules) != 1 || st.Rules[0].MeasuredAt == nil || !st.Rules[0].MeasuredAt.Equal(h.now) || st.Rules[0].MaxBytes != 2000 {
+		t.Errorf("rules after max_size change = %+v", st.Rules)
+	}
+
+	h.now = h.now.Add(time.Minute)
+	h.writeConfig(t, strings.Replace(lenientConfig, `max_size  = "1KB"`, `max_size  = "2KB"`, 1)+`
+[[dir_rules]]
+rule_name = "second"
+path      = "~/Library/Caches/Homebrew"
+max_size  = "1GB"
+`)
+	if code := h.run("check"); code != 0 {
+		t.Fatal(h.stderr.String())
+	}
+	st = h.statusFile(t)
+	if len(st.Rules) != 2 {
+		t.Fatalf("rules after adding a rule = %+v", st.Rules)
+	}
+	for _, r := range st.Rules {
+		if r.MeasuredAt == nil || !r.MeasuredAt.Equal(h.now) {
+			t.Errorf("rule %q not re-measured: %+v", r.RuleName, r)
+		}
+	}
+}
+
+func TestPromptSurvivesBrokenConfig(t *testing.T) {
+	h := newHarness(t)
+	h.writeConfig(t, lenientConfig)
+	if err := os.WriteFile(filepath.Join(h.home, ".m2", "repository", "big.jar"), make([]byte, 8192), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code := h.run("check"); code != 0 {
+		t.Fatal(h.stderr.String())
+	}
+	h.writeConfig(t, "[disk]\nfree_below = 1\n")
+	if code := h.run("status", "--prompt"); code != 0 || h.stdout.String() != "· 1 over max" || h.stderr.String() != "" {
+		t.Errorf("prompt with broken config: exit %d, out %q, err %q", code, h.stdout.String(), h.stderr.String())
+	}
+	if code := h.run("status"); code != 0 || !strings.Contains(h.stdout.String(), "state ok") {
+		t.Errorf("status with broken config: exit %d, out %q, err %q", code, h.stdout.String(), h.stderr.String())
+	}
+
+	dir, _ := state.DefaultDir(func(string) string { return "" }, h.home)
+	raw, err := os.ReadFile(dir.Path("status.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dir.Path("status.json"), raw[:40], 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code := h.run("status", "--prompt"); code != 0 || h.stdout.String() != "" || h.stderr.String() != "" {
+		t.Errorf("prompt with torn status: exit %d, out %q, err %q", code, h.stdout.String(), h.stderr.String())
+	}
+	if code := h.run("status"); code != ExitUnknown {
+		t.Errorf("status with torn status: exit %d, want %d", code, ExitUnknown)
+	}
+}
+
+func TestStatusNeedsNoConfig(t *testing.T) {
+	h := newHarness(t)
+	h.writeConfig(t, lenientConfig)
+	if code := h.run("check"); code != 0 {
+		t.Fatal(h.stderr.String())
+	}
+	if err := os.Remove(filepath.Join(h.home, ".config", "dusk", "config.toml")); err != nil {
+		t.Fatal(err)
+	}
+	if code := h.run("status"); code != 0 || !strings.Contains(h.stdout.String(), "state ok") {
+		t.Errorf("status without a config: exit %d, out %q, err %q", code, h.stdout.String(), h.stderr.String())
+	}
+}
+
+func TestCheckLeavesUnmeasurableRuleUnmeasured(t *testing.T) {
+	h := newHarness(t)
+	h.writeConfig(t, lenientConfig+"\n[[dir_rules]]\nrule_name = \"gone\"\npath = \"~/gone\"\nmax_size = \"1KB\"\n")
+	if code := h.run("check"); code != 0 {
+		t.Fatalf("exit %d, stderr %s", code, h.stderr.String())
+	}
+	if !strings.Contains(h.stderr.String(), "not measured") {
+		t.Errorf("stderr %q lacks the not measured warning", h.stderr.String())
+	}
+	st := h.statusFile(t)
+	if len(st.Rules) != 2 {
+		t.Fatalf("rules = %+v", st.Rules)
+	}
+	gone := st.Rules[1]
+	if gone.RuleName != "gone" || gone.MeasuredAt != nil || gone.OverMax || gone.AllocatedBytes != 0 {
+		t.Errorf("unmeasurable rule = %+v, want no measurement time and no size", gone)
+	}
+	if code := h.run("status"); code != 0 || !strings.Contains(h.stdout.String(), "never") {
+		t.Errorf("status: exit %d, out %q", code, h.stdout.String())
+	}
+}
+
+func TestCheckExitCodesAndLock(t *testing.T) {
+	h := newHarness(t)
+	if code := h.run("check"); code != ExitUnknown {
+		t.Errorf("missing config exit = %d, want 3", code)
+	}
+	h.writeConfig(t, lenientConfig)
+	dir, _ := state.DefaultDir(func(string) string { return "" }, h.home)
+	release, err := dir.Lock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code := h.run("check"); code != ExitLocked {
+		t.Errorf("locked exit = %d, want 75", code)
+	}
+	release()
+	if code := h.run("check"); code != 0 {
+		t.Errorf("unlocked exit = %d, stderr %s", code, h.stderr.String())
+	}
+}
+
+// TestCheckExitCodesFollowState drives the state machine from the thresholds:
+// a warn band nearly every volume falls into gives exit 1, and a critical band
+// nearly every volume falls into gives exit 2.
+func TestCheckExitCodesFollowState(t *testing.T) {
+	bands := func(criticalBelow, criticalAbove string) string {
+		return `
+[disk.warn]
+when_free_below  = ["99%"]
+clear_when_above = ["99.5%"]
+[disk.critical]
+when_free_below  = ["` + criticalBelow + `"]
+clear_when_above = ["` + criticalAbove + `"]
+[[dir_rules]]
+rule_name = "maven-repository"
+path      = "~/.m2/repository"
+max_size  = "1GB"
+`
+	}
+	h := newHarness(t)
+	h.writeConfig(t, bands("0.1%", "0.2%"))
+	if code := h.run("check"); code != 1 {
+		t.Fatalf("warn exit = %d, want 1, stderr %s", code, h.stderr.String())
+	}
+	if st := h.statusFile(t); st.Disk.State != "warn" || st.Summary.State != "warn" {
+		t.Errorf("state = %q, summary %q, want warn", st.Disk.State, st.Summary.State)
+	}
+	sd, _ := state.DefaultDir(func(string) string { return "" }, h.home)
+	prompt, _ := sd.ReadPrompt()
+	if !strings.Contains(prompt, "% free") {
+		t.Errorf("warn prompt = %q, want the warn template", prompt)
+	}
+
+	h.now = h.now.Add(time.Minute)
+	h.writeConfig(t, bands("99.9%", "99.95%"))
+	if code := h.run("check"); code != 2 {
+		t.Fatalf("critical exit = %d, want 2, stderr %s", code, h.stderr.String())
+	}
+	if st := h.statusFile(t); st.Disk.State != "critical" || st.Summary.State != "critical" {
+		t.Errorf("state = %q, summary %q, want critical", st.Disk.State, st.Summary.State)
+	}
+	prompt, _ = sd.ReadPrompt()
+	if !strings.Contains(prompt, "GB free!") {
+		t.Errorf("critical prompt = %q, want the critical template", prompt)
+	}
+}
+
+func TestStatusCommand(t *testing.T) {
+	h := newHarness(t)
+	h.writeConfig(t, lenientConfig)
+	if err := os.WriteFile(filepath.Join(h.home, ".m2", "repository", "big.jar"), make([]byte, 8192), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code := h.run("status"); code != 0 || !strings.Contains(h.stderr.String(), "no status yet") {
+		t.Errorf("status before check: exit %d, err %q", code, h.stderr.String())
+	}
+	if code := h.run("status", "--prompt"); code != 0 || h.stdout.String() != "" {
+		t.Errorf("prompt before check must be empty: exit %d, out %q", code, h.stdout.String())
+	}
+	if code := h.run("check"); code != 0 {
+		t.Fatal(h.stderr.String())
+	}
+	if code := h.run("status"); code != 0 || !strings.Contains(h.stdout.String(), "maven-repository") || !strings.Contains(h.stdout.String(), "state ok") {
+		t.Errorf("status: exit %d, out %q", code, h.stdout.String())
+	}
+	if code := h.run("status", "--prompt"); code != 0 || h.stdout.String() != "· 1 over max" {
+		t.Errorf("status --prompt = %q", h.stdout.String())
+	}
+	if code := h.run("status", "--json"); code != 0 {
+		t.Fatal(h.stderr.String())
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(h.stdout.Bytes(), &raw); err != nil || raw["schema"].(float64) != 1 {
+		t.Errorf("status --json = %s, %v", h.stdout.String(), err)
+	}
+	h.now = h.now.Add(3 * time.Hour)
+	if code := h.run("status", "--prompt"); code != 0 || h.stdout.String() != "󰋊 dusk stale" {
+		t.Errorf("stale prompt = %q", h.stdout.String())
+	}
+}
