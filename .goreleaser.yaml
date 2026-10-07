@@ -87,8 +87,13 @@ brews:
     license: MIT
     # The safe deletion path needs unlinkat(2) with AT_RESOLVE_BENEATH, which
     # the kernel first honours in macOS 26.0. Older releases return EINVAL.
+    # GoReleaser writes a top level `depends_on :macos` for a darwin only
+    # build, and Homebrew refuses to load a formula that also sets
+    # `depends_on macos:` at the top level, so the minimum sits in on_macos.
     custom_block: |
-      depends_on macos: :tahoe
+      on_macos do
+        depends_on macos: :tahoe
+      end
     dependencies:
       - name: terminal-notifier
     install: |
