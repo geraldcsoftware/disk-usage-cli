@@ -96,7 +96,10 @@ brews:
       end
     dependencies:
       - name: terminal-notifier
+    # Homebrew runs `dusk completion <shell>` at install time and places the
+    # bash, zsh, fish and PowerShell scripts where each shell looks for them.
     install: |
       bin.install "dusk"
+      generate_completions_from_executable(bin/"dusk", shell_parameter_format: :cobra)
     test: |
       system "#{bin}/dusk", "version"
