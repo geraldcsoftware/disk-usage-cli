@@ -4,6 +4,12 @@ version: 2
 
 project_name: dusk
 
+# A final tag usually shares a commit with its release candidate (v0.1.0 and
+# v0.1.0-rc.1). Plain version sorting ranks the longer rc tag first, so "-" is
+# declared the prerelease suffix to rank v0.1.0 above v0.1.0-rc.1.
+git:
+  prerelease_suffix: "-"
+
 before:
   hooks:
     - go mod tidy
